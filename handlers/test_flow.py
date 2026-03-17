@@ -1,86 +1,73 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import asyncio
+import logging
+from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
-from config import DIFFICULTIES, QUESTION_COUNTS
-from utils.markdown import escape_md
+from telegram.error import TimedOut, RetryAfter
+from config import SUBJECTS, QUESTIONS_PER_SUBJECT
 from openrouter_client import generate_test
-from handlers.questions import send_question
+from utils.markdown import escape_md
 
-async def subject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+logger = logging.getLogger(__name__)
+
+async def safe_send_message(context, chat_id, text, parse_mode=None, reply_markup=None, retries=3):
+    for attempt in range(retries):
+        try:
+            return await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup
+            )
+        except (TimedOut, RetryAfter) as e:
+            logger.warning(f"Ошибка отправки сообщения (попытка {attempt+1}/{retries}): {e}")
+            if attempt == retries - 1:
+                raise
+            await asyncio.sleep(2 ** attempt)
+        except Exception as e:
+            logger.error(f"Неизвестная ошибка отправки: {e}")
+            raise
+
+async def fulltest_difficulty_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    subject_code = query.data.replace("subj_", "")
-    context.user_data["subject"] = subject_code
-
-    keyboard = [
-        [InlineKeyboardButton(name, callback_data=f"diff_{code}")]
-        for code, name in DIFFICULTIES
-    ]
-    keyboard.append([InlineKeyboardButton(" Назад", callback_data="back_to_subjects")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        escape_md("Выбери уровень сложности:"),
-        parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=reply_markup
-    )
-
-async def difficulty_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    difficulty = query.data.replace("diff_", "")
+    difficulty = query.data.replace("fulltest_diff_", "")
     context.user_data["difficulty"] = difficulty
-
-    keyboard = [
-        [InlineKeyboardButton(f"{n} вопросов", callback_data=f"qcount_{n}")]
-        for n in QUESTION_COUNTS
-    ]
-    keyboard.append([InlineKeyboardButton(" Назад", callback_data="back_to_difficulty")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(
-        escape_md("Сколько вопросов будет в тесте?"),
-        parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=reply_markup
-    )
-
-async def qcount_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    num = int(query.data.replace("qcount_", ""))
-    context.user_data["num_questions"] = num
+    context.user_data["mode"] = "full_test"
+    context.user_data["subjects_to_do"] = list(SUBJECTS)
+    context.user_data["subject_results"] = {}
 
     await query.edit_message_text(
-        escape_md("⏳ Генерирую тест... Подожди немного."),
+        escape_md("⏳ Генерирую тесты по всем предметам... Это может занять до минуты."),
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
-    subject = context.user_data["subject"]
-    difficulty = context.user_data["difficulty"]
-    questions = await generate_test(subject, difficulty, num)
+    tasks = []
+    for code, name in SUBJECTS:
+        tasks.append(generate_test(code, difficulty, QUESTIONS_PER_SUBJECT))
 
-    if not questions:
-        await query.edit_message_text(
-            escape_md(" Не удалось сгенерировать тест. Попробуй позже."),
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-        return
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    context.user_data["questions"] = questions
-    context.user_data["current"] = 0
-    context.user_data["score"] = 0
+    all_questions = {}
+    failed_subjects = []
+    for (code, name), res in zip(SUBJECTS, results):
+        if isinstance(res, Exception) or not res:
+            failed_subjects.append(name)
+            all_questions[code] = []
+        else:
+            all_questions[code] = res
 
-    await send_question(update, context)
+    context.user_data["all_questions"] = all_questions
 
-async def back_to_difficulty(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    keyboard = [
-        [InlineKeyboardButton(name, callback_data=f"diff_{code}")]
-        for code, name in DIFFICULTIES
-    ]
-    keyboard.append([InlineKeyboardButton(" Назад", callback_data="back_to_subjects")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if failed_subjects:
+        result_text = f"⚠️ Не удалось сгенерировать тесты для: {', '.join(failed_subjects)}. Они будут пропущены."
+    else:
+        result_text = "✅ Все тесты успешно сгенерированы! Начинаем..."
+
     await query.edit_message_text(
-        escape_md("Выбери уровень сложности:"),
-        parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=reply_markup
+        escape_md(result_text),
+        parse_mode=ParseMode.MARKDOWN_V2
     )
+
+    from handlers.full_test import start_next_subject
+    await start_next_subject(update, context)

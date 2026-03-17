@@ -1,5 +1,8 @@
-import re
+def escape_md(text):
 
-def escape_md(text: str) -> str:
-    special_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(r'([%s])' % re.escape(special_chars), r'\\\1', text)
+    chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+
+
+    for ch in chars:
+        text = text.replace(ch, f'\\{ch}')
+    return text
