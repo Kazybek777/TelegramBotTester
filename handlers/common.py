@@ -43,12 +43,10 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Правильных ответов: {stats['correct_answers']}\n"
             f"• Средний балл: {avg:.1f}%"
         )
-        # Добавляем кнопку очистки только если есть данные
         keyboard.append([InlineKeyboardButton("🗑 Очистить статистику", callback_data="reset_stats")])
     else:
         text = " Ты ещё не проходил тесты. Начни с /start"
 
-    # Кнопка "Назад" добавляется всегда
     keyboard.append([InlineKeyboardButton(" Назад", callback_data="back_to_subjects")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -78,7 +76,7 @@ async def reset_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         escape_md(" Статистика успешно очищена!"),
         parse_mode=ParseMode.MARKDOWN_V2
     )
-    # Можно сразу показать обновлённую статистику
+
     await show_stats(update, context)
 
 async def back_to_subjects(update: Update, context: ContextTypes.DEFAULT_TYPE):

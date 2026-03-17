@@ -43,7 +43,6 @@ def get_stats(user_id):
             return dict(row)
         return None
 
-# Новая функция для сброса статистики пользователя
 def reset_stats(user_id):
     with get_db() as conn:
         conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))

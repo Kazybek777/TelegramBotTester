@@ -37,7 +37,6 @@ async def generate_test(subject: str, difficulty: str, num_questions: int) -> li
 Убедись, что JSON валидный и не содержит лишнего текста. Ответ должен содержать только JSON.
 """
     try:
-        # Используем конкретную быструю модель
         response = await client.chat.completions.create(
             model="openrouter/free",
             messages=[{"role": "user", "content": prompt}],
@@ -50,7 +49,6 @@ async def generate_test(subject: str, difficulty: str, num_questions: int) -> li
             logger.error("Пустой ответ от модели")
             return []
 
-        # Извлечение JSON
         json_match = re.search(r'```json\s*([\s\S]*?)\s*```', content)
         if not json_match:
             json_match = re.search(r'(\[[\s\S]*\])', content)
